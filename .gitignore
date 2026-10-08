@@ -35,6 +35,14 @@ next-env.d.ts
 coverage/
 .nyc_output/
 
+# SQLite databases (the backend creates and seeds its own on first run)
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
 # Misc
 *.pem
 .vercel
