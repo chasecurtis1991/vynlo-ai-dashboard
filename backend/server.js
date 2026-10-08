@@ -2,16 +2,19 @@ const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// Initialize SQLite database
-const dbPath = path.join(__dirname, 'data', 'analytics.db');
+// Initialize SQLite database (the data directory is git-ignored and created on demand)
+const dataDir = path.join(__dirname, 'data');
+fs.mkdirSync(dataDir, { recursive: true });
+const dbPath = path.join(dataDir, 'analytics.db');
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) console.error('Database connection error:', err);
   else console.log('Connected to SQLite database');
@@ -248,16 +251,16 @@ app.post('/api/tasks', (req, res) => {
   const { title, description, status, priority, category, due_date } = req.body;
   
   // Get max order for the status column
-  db.get(`SELECT COALESCE(MAX(task_order), -1) as maxOrder FROM tasks WHERE status = ?`, 
-    [status || 'pending'], (err, row) => {
+  db.get(`SELECT COALESCE(MAX(task_order), -1) as maxOrder FROM tasks WHERE status = ?`,
+    [status || 'todo'], (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
-    
+
     const newOrder = (row?.maxOrder || 0) + 1;
-    
+
     db.run(`
       INSERT INTO tasks (title, description, status, priority, category, task_order, due_date, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [title, description, status || 'pending', priority || 'medium', category || 'general', newOrder, due_date, getNow(), getNow()],
+    `, [title, description, status || 'todo', priority || 'medium', category || 'general', newOrder, due_date, getNow(), getNow()],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ id: this.lastID, message: 'Task created successfully' });
@@ -279,7 +282,7 @@ app.put('/api/tasks/:id', (req, res) => {
         category = COALESCE(?, category),
         due_date = COALESCE(?, due_date),
         updated_at = ?,
-        completed_at = CASE WHEN ? = 'completed' AND completed_at IS NULL THEN ? ELSE completed_at END
+        completed_at = CASE WHEN ? IN ('done', 'completed') AND completed_at IS NULL THEN ? ELSE completed_at END
     WHERE id = ?
   `, [title, description, status, priority, category, due_date, getNow(), status, getNow(), taskId],
   function(err) {
@@ -408,12 +411,12 @@ app.delete('/api/tasks/:id', (req, res) => {
 // Get task stats
 app.get('/api/tasks/stats/summary', (req, res) => {
   db.get(`
-    SELECT 
+    SELECT
       COUNT(*) as total,
-      SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+      SUM(CASE WHEN status = 'backlog' THEN 1 ELSE 0 END) as backlog,
+      SUM(CASE WHEN status = 'todo' THEN 1 ELSE 0 END) as todo,
       SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
-      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
-      SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled
+      SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done
     FROM tasks
   `, (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -425,39 +428,39 @@ app.get('/api/tasks/stats/summary', (req, res) => {
 // END TASK BOARD API ENDPOINTS
 // ============================================
 
-// Seed some tasks for distribution chart
+// Seed demo tasks (fake data) so the task board and distribution chart have content on first run.
+// Statuses match the board columns: backlog, todo, in_progress, done.
 db.get("SELECT COUNT(*) as count FROM tasks", (err, row) => {
   if (row.count === 0) {
     const tasks = [
-      { title: 'Process customer request', status: 'completed', priority: 'high', category: 'support' },
-      { title: 'Generate daily report', status: 'completed', priority: 'medium', category: 'reports' },
-      { title: 'Update database', status: 'completed', priority: 'high', category: 'development' },
+      { title: 'Process customer request', status: 'done', priority: 'high', category: 'support' },
+      { title: 'Generate daily report', status: 'done', priority: 'medium', category: 'reports' },
+      { title: 'Update database', status: 'done', priority: 'high', category: 'development' },
       { title: 'Send notifications', status: 'in_progress', priority: 'medium', category: 'automation' },
       { title: 'Analyze metrics', status: 'in_progress', priority: 'low', category: 'analytics' },
-      { title: 'Review emails', status: 'pending', priority: 'medium', category: 'communication' },
-      { title: 'Schedule meeting', status: 'pending', priority: 'low', category: 'meetings' },
-      { title: 'Backup files', status: 'pending', priority: 'low', category: 'maintenance' },
-      { title: 'Code review', status: 'pending', priority: 'high', category: 'development' },
-      { title: 'Update documentation', status: 'pending', priority: 'medium', category: 'documentation' },
+      { title: 'Review emails', status: 'todo', priority: 'medium', category: 'communication' },
+      { title: 'Schedule meeting', status: 'todo', priority: 'low', category: 'meetings' },
+      { title: 'Backup files', status: 'backlog', priority: 'low', category: 'maintenance' },
+      { title: 'Code review', status: 'todo', priority: 'high', category: 'development' },
+      { title: 'Update documentation', status: 'backlog', priority: 'medium', category: 'documentation' },
     ];
 
+    const orderByStatus = {};
     const stmt = db.prepare(`
       INSERT INTO tasks (title, status, priority, category, task_order, created_at, updated_at, completed_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    tasks.forEach((t, index) => {
-      stmt.run(t.title, t.status, t.priority, t.category, index, getNow(), getNow(), t.status === 'completed' ? getNow() : null);
+    tasks.forEach((t) => {
+      const order = orderByStatus[t.status] || 0;
+      orderByStatus[t.status] = order + 1;
+      stmt.run(t.title, t.status, t.priority, t.category, order, getNow(), getNow(), t.status === 'done' ? getNow() : null);
     });
 
     stmt.finalize();
     console.log('Seeded initial task board data');
   }
 });
-
-function formatDate(date) {
-  return (date || new Date()).toISOString().replace('T', ' ').substring(0, 19);
-}
 
 function getNow() {
   return new Date().toISOString().replace('T', ' ').substring(0, 19);

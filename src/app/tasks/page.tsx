@@ -31,7 +31,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Select, Label, Textarea } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5000";
+const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001";
 
 interface Task {
   id: number;
@@ -298,16 +298,9 @@ export default function TaskBoardPage() {
       if (priorityFilter !== "all") params.append("priority", priorityFilter);
       if (categoryFilter !== "all") params.append("category", categoryFilter);
 
-      const url = `${API_BASE}/api/tasks?${params}`;
-      console.log("[API] Fetching tasks from:", url);
-
-      const res = await fetch(url);
-      console.log("[API] Response status:", res.status);
-
+      const res = await fetch(`${API_BASE}/api/tasks?${params}`);
       const data = await res.json();
-      console.log("[API] Received", data.length || 0, "tasks. Statuses:", Array.from(new Set(data.map((t: Task) => t.status) || [])));
-
-      setTasks(data || []);
+      setTasks(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("[API] Failed to fetch tasks:", error);
     }
@@ -315,10 +308,8 @@ export default function TaskBoardPage() {
 
   const fetchStats = async () => {
     try {
-      console.log("[API] Fetching stats from:", `${API_BASE}/api/tasks/stats/summary`);
       const res = await fetch(`${API_BASE}/api/tasks/stats/summary`);
       const data = await res.json();
-      console.log("[API] Stats:", data);
       setStats(data);
     } catch (error) {
       console.error("[API] Failed to fetch stats:", error);
@@ -340,31 +331,21 @@ export default function TaskBoardPage() {
     if (task) {
       setActiveTask(task);
       setOriginalStatus(task.status);
-      console.log("[DragStart] Started dragging task:", task.title, "originalStatus:", task.status);
     }
   };
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
-    console.log("[DragEnd] Event received:", { activeId: active.id, overId: over?.id });
     setActiveTask(null);
 
-    if (!over) {
-      console.log("[DragEnd] No over target, returning");
-      return;
-    }
+    if (!over) return;
 
     const activeId = active.id as number;
     const overId = over.id as string | number;
-    console.log("[DragEnd] activeId:", activeId, "overId:", overId);
 
     // Find the original task from current tasks state
     const activeTask = tasks.find(t => t.id === activeId);
-    if (!activeTask) {
-      console.log("[DragEnd] Active task not found in tasks");
-      return;
-    }
-    console.log("[DragEnd] Active task found:", activeTask.title, "status:", activeTask.status);
+    if (!activeTask) return;
 
     // Determine target status
     let newStatus = activeTask.status;
@@ -372,14 +353,12 @@ export default function TaskBoardPage() {
 
     // Check if dropped on a column (column IDs are strings like "backlog", "todo", etc.)
     let targetColumn = COLUMNS.find(c => c.id === overId || c.id === String(overId));
-    console.log("[DragEnd] targetColumn match:", targetColumn);
 
     // If over.id is not a column, it might be a task - find its column
     if (!targetColumn && overId) {
       const taskDroppedOn = tasks.find(t => t.id === Number(overId));
       if (taskDroppedOn) {
         targetColumn = COLUMNS.find(c => c.id === taskDroppedOn.status);
-        console.log("[DragEnd] Found target column from task:", targetColumn);
       }
     }
 
@@ -387,21 +366,16 @@ export default function TaskBoardPage() {
       newStatus = targetColumn.id;
       const columnTasks = tasks.filter(t => t.status === newStatus);
       newOrder = columnTasks.length;
-      console.log("[DragEnd] Dropped on column:", newStatus, "newOrder:", newOrder);
     }
-
-    console.log("[DragEnd] Comparing status: original=", originalStatus, "new=", newStatus);
 
     // Only update if status actually changed (compare against original status, not current state)
     if (newStatus === originalStatus) {
-      console.log("[DragEnd] Status unchanged, skipping API call");
-      setOriginalStatus(null); // Reset
+      setOriginalStatus(null);
       return;
     }
 
     // Optimistic update
     const previousTasks = [...tasks];
-    console.log("[DragEnd] Updating optimistic UI, calling API...");
     setTasks(prev => {
       const updated = prev.map(t => {
         if (t.id === activeId) {
@@ -413,23 +387,18 @@ export default function TaskBoardPage() {
     });
 
     try {
-      console.log("[DragEnd] Calling API:", `${API_BASE}/api/tasks/${activeId}/move`, "PUT", { status: newStatus, newOrder });
       const response = await fetch(`${API_BASE}/api/tasks/${activeId}/move`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus, newOrder }),
       });
-      console.log("[DragEnd] API response status:", response.status);
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error("[DragEnd] API error:", errorText);
         throw new Error(`API error: ${response.status}`);
       }
       await fetchTasks();
       await fetchStats();
-      console.log("[DragEnd] Move completed successfully");
     } catch (error) {
-      console.error("[DragEnd] Failed to move task:", error);
+      console.error("Failed to move task:", error);
       setTasks(previousTasks);
     }
   };
@@ -464,12 +433,12 @@ export default function TaskBoardPage() {
     }
   };
 
-  const openCreateDialog = () => {
+  const openCreateDialog = (status: string = "todo") => {
     setEditingTask(null);
     setFormData({
       title: "",
       description: "",
-      status: "pending",
+      status,
       priority: "medium",
       category: "general",
       assignee: "",
@@ -542,7 +511,7 @@ export default function TaskBoardPage() {
           <h1 className="text-2xl font-bold">Task Board</h1>
           <p className="text-muted-foreground">Manage your tasks with drag and drop</p>
         </div>
-        <Button onClick={openCreateDialog}>
+        <Button onClick={() => openCreateDialog()}>
           <Plus className="h-4 w-4 mr-2" />
           Add Task
         </Button>
@@ -628,10 +597,7 @@ export default function TaskBoardPage() {
                 key={column.id}
                 column={column}
                 tasks={getTasksByStatus(column.id)}
-                onAddTask={() => {
-                  setFormData(prev => ({ ...prev, status: column.id }));
-                  openCreateDialog();
-                }}
+                onAddTask={() => openCreateDialog(column.id)}
                 onEditTask={openEditDialog}
                 onDeleteTask={handleDelete}
               />
