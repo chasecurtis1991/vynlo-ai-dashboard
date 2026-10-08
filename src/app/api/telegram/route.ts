@@ -5,9 +5,6 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { message, token, chatId } = body;
 
-    console.log("Telegram API - Token received:", token ? token.substring(0, 10) + "..." : "NO TOKEN");
-    console.log("Telegram API - Chat ID received:", chatId || "NO CHAT ID");
-
     if (!token || !chatId || !message) {
       return NextResponse.json(
         { error: "Missing token, chatId, or message" },
@@ -28,7 +25,6 @@ export async function POST(request: Request) {
     });
 
     const data = await response.json();
-    console.log("Telegram API - Response:", data);
 
     if (data.ok) {
       return NextResponse.json({ success: true });

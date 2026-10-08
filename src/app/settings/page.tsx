@@ -14,7 +14,7 @@ const settingsSections = [
     icon: Settings,
     items: [
       { label: "Display Name", key: "displayName", type: "text", default: "Vynlo AI" },
-      { label: "Email", key: "email", type: "email", default: "vynlo@agency.com" },
+      { label: "Email", key: "email", type: "email", default: "demo@example.com" },
       { label: "Timezone", key: "timezone", type: "select", default: "UTC" },
     ],
   },
@@ -120,10 +120,7 @@ export default function SettingsPage() {
     
     const tokenValue = String(settings.telegramToken || "");
     const chatIdValue = String(settings.telegramChatId || "");
-    
-    console.log("Saving token:", tokenValue);
-    console.log("Saving chat ID:", chatIdValue);
-    
+
     if (tokenValue) {
       localStorage.setItem("vynlo_telegramToken", tokenValue);
     }
@@ -160,10 +157,7 @@ export default function SettingsPage() {
   const testTelegram = async () => {
     const token = localStorage.getItem("vynlo_telegramToken") || String(settings.telegramToken || "");
     const chatId = localStorage.getItem("vynlo_telegramChatId") || String(settings.telegramChatId || "");
-    
-    console.log("Testing with token:", token);
-    console.log("Testing with chat ID:", chatId);
-    
+
     if (token && chatId) {
       const testMsg = `✅ **Telegram Connected!**\n\nVynlo AI Dashboard notifications are working correctly.`;
       
@@ -292,7 +286,7 @@ export default function SettingsPage() {
                 <label className="text-sm font-medium">Email</label>
                 <Input
                   type="email"
-                  value={settings.email || "vynlo@agency.com"}
+                  value={settings.email || "demo@example.com"}
                   onChange={(e) => handleSettingChange("email", e.target.value)}
                   className="mt-1"
                 />
